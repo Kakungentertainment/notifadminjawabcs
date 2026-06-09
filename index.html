@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin - Balas Pesan</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body class="bg-gray-100 min-h-screen p-4">
+  <div class="max-w-lg mx-auto bg-white rounded-xl shadow p-5">
+    <h2 class="text-center text-xl font-bold text-sky-600 mb-2">📩 Pesan Masuk Layanan</h2>
+    
+    <div class="text-center mb-4">
+      <button onclick="hapusSemuaChat()" class="bg-red-500 hover:bg-red-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow transition-all">
+        🗑️ Hapus Semua Chat
+      </button>
+    </div>
+
+    <div id="daftarPesan" class="space-y-4">Memuat pesan...</div>
+  </div>
+
+  <script>
+    const URL = "https://script.google.com/macros/s/AKfycbw8FRySGsbOspS-OtiTTESfSyJcDbYMOLFXSBynKAY34BS-hIAtQEM3pE0H0yOKknc-/exec";
+
+    let dataPesanLokal = [];
+    let intervalAdmin;
+    let sedangMengirimAdmin = false; 
+
+    // DAFTARKAN SERVICE WORKER (Sistem Latar Belakang)
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js')
+          .then(reg => {
+            console.log('Service Worker berhasil didaftarkan!', reg.scope);
+            // Minta izin notifikasi lewat Service Worker
+            if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+              Notification.requestPermission();
+            }
+          })
+          .catch(err => console.error('Service Worker Gagal:', err));
+      });
+    }
+
+    async function ambilSemuaPesan() {
+      if (sedangMengirimAdmin) return;
+      try {
+        const res = await fetch(`${URL}?action=getPesan`);
+        const data = await res.json();
+        dataPesanLokal = data; 
+        tampilkan(data);
+      } catch (error) {
+        console.error(error);
+        document.getElementById("daftarPesan").innerHTML = `<p class="text-red-500 text-center">❌ Gagal terhubung ke database Cloud. Cek URL.</p>`;
+      }
+    }
+
+    function tampilkan(pesan) {
+      const wadah = document.getElementById("daftarPesan");
+      if (!pesan || !pesan.length) {
+        wadah.innerHTML = `<p class="text-center text-gray-500 py-4">Belum ada pesan masuk</p>`;
+        return;
+      }
+
+      const elemenAktif = document.activeElement;
+      const idAktif = elemenAktif ? elemenAktif.id : null;
+      
+      const drafKetikan = {};
+      document.querySelectorAll("textarea").forEach(ta => {
+        drafKetikan[ta.id] = ta.value;
+      });
+
+      wadah.innerHTML = pesan.map((item, i) => {
+        if (item.dari === "admin") {
+          let infoBalasanKutipan = "";
+          if (item.membalas) {
+            infoBalasanKutipan = `<p class="text-[11px] text-green-700 bg-green-100 p-1 rounded my-1 truncate">↩️ Membalas: "${item.membalas}"</p>`;
+          }
+
+          return `
+            <div class="border border-green-300 bg-green-50 p-3 rounded-lg">
+              <p class="text-xs text-gray-400">⚡ Balasan Admin Anda</p>
+              ${infoBalasanKutipan}
+              <p class="font-medium my-1 text-gray-700">💬 ${item.isi}</p>
+              <p class="text-green-600 text-xs font-semibold">✅ Sudah terkirim ke pelanggan</p>
+            </div>
+          `;
+        }
+
+        const labelNamaUser = item.nama || "USER :";
+
+        return `
+          <div class="border border-orange-300 bg-orange-50 p-3 rounded-lg">
+            <p class="text-xs text-orange-600 font-semibold">👤 Pesan Pelanggan (${labelNamaUser})</p>
+            <div class="my-2">
+              ${item.jenis === 'foto' 
+                ? `<img src="${item.isi}" class="max-w-[150px] max-h-[150px] rounded-lg border bg-white p-1">` 
+                : `<p class="font-medium text-gray-800">💬 ${item.isi}</p>`
+              }
+            </div>
+            <textarea id="balas-${i}" placeholder="Ketik balasan Anda ke pelanggan..." class="w-full border p-2 rounded text-sm mb-2 outline-none focus:border-sky-500"></textarea>
+            <button onclick="kirimBalasan(${i})" class="bg-sky-500 text-white px-4 py-1.5 rounded text-sm hover:bg-sky-600 transition-all">Kirim Balasan</button>
+          </div>`;
+      }).reverse().join("");
+
+      Object.keys(drafKetikan).forEach(id => {
+        const taBaru = document.getElementById(id);
+        if (taBaru) taBaru.value = drafKetikan[id];
+      });
+
+      if (idAktif) {
+        const elemenBaru = document.getElementById(idAktif);
+        if (elemenBaru) {
+          elemenBaru.focus();
+          const val = elemenBaru.value;
+          elemenBaru.value = '';
+          elemenBaru.value = val;
+        }
+      }
+    }
+
+    async function kirimBalasan(index) {
+      const inputBalas = document.getElementById(`balas-${index}`);
+      const teksBalas = inputBalas.value.trim();
+      if (!teksBalas) return alert("Isi balasan terlebih dahulu!");
+
+      let teksAsliPelanggan = "";
+      if (dataPesanLokal[index]) {
+        teksAsliPelanggan = dataPesanLokal[index].jenis === 'foto' ? '🖼️ [Foto]' : dataPesanLokal[index].isi;
+      }
+
+      try {
+        sedangMengirimAdmin = true;
+        clearInterval(intervalAdmin);
+
+        inputBalas.disabled = true;
+        inputBalas.placeholder = "Sedang mengirim balasan kuci aman...";
+
+        await fetch(URL, {
+          method: "POST",
+          mode: "no-cors",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            dari: "admin",
+            jenis: "teks",
+            isi: teksBalas,
+            nama: "ADMIN",
+            membalas: teksAsliPelanggan 
+          })
+        });
+
+        inputBalas.value = "";
+        
+        setTimeout(async () => {
+          sedangMengirimAdmin = false;
+          await ambilSemuaPesan();
+          mulaiAutoRefreshAdmin();
+        }, 2500);
+
+      } catch (error) {
+        alert("❌ Gagal mengirim balasan.");
+        console.error(error);
+        sedangMengirimAdmin = false;
+        mulaiAutoRefreshAdmin();
+      }
+    }
+
+    async function hapusSemuaChat() {
+      const konfirmasi = confirm("Apakah Anda yakin ingin menghapus SEMUA riwayat chat dari Google Sheets? Tindakan ini tidak bisa dibatalkan.");
+      if (!konfirmasi) return;
+
+      try {
+        document.getElementById("daftarPesan").innerHTML = "Membersihkan chat...";
+        const res = await fetch(`${URL}?action=clearChat`);
+        await res.json();
+        alert("🗑️ Semua riwayat chat berhasil dihapus!");
+        ambilSemuaPesan();
+      } catch (error) {
+        ambilSemuaPesan();
+      }
+    }
+
+    function mulaiAutoRefreshAdmin() {
+      clearInterval(intervalAdmin);
+      intervalAdmin = setInterval(ambilSemuaPesan, 5000);
+    }
+
+    ambilSemuaPesan();
+    mulaiAutoRefreshAdmin();
+  </script>
+</body>
+</html>
